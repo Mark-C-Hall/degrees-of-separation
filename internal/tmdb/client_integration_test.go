@@ -21,7 +21,7 @@ func newTestClient(t *testing.T) *Client {
 	}
 	return &Client{
 		HTTPClient:  http.Client{Timeout: 10 * time.Second},
-		APIURL:      defaultAPIURL,
+		APIURL:      DEFAULT_URL,
 		APIToken:    token,
 		Limiter:     rate.NewLimiter(rate.Every(time.Second/4), 5),
 		MaxRetries:  3,

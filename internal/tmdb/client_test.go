@@ -31,8 +31,8 @@ func TestGetPopularMovies_Success(t *testing.T) {
 		fmt.Fprint(w, `{
 			"total_pages": 500,
 			"results": [
-				{"id": 123, "title": "Fight Club"},
-				{"id": 456, "title": "The Matrix"}
+				{"id": 123, "title": "Fight Club", "release_date": "1999-10-15"},
+				{"id": 456, "title": "The Matrix", "release_date": "1999-03-31"}
 			]
 		}`)
 	})
@@ -52,6 +52,9 @@ func TestGetPopularMovies_Success(t *testing.T) {
 	}
 	if resp.Results[0].ID != 123 || resp.Results[0].Title != "Fight Club" {
 		t.Errorf("unexpected first result: %+v", resp.Results[0])
+	}
+	if resp.Results[0].ReleaseDate != "1999-10-15" {
+		t.Errorf("expected ReleaseDate=1999-10-15, got %s", resp.Results[0].ReleaseDate)
 	}
 }
 

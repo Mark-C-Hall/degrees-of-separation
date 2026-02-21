@@ -69,19 +69,19 @@ degrees/
 
 ### 1.2 Neo4j Graph Layer
 
-- [ ] Create `internal/graph/` with connection pool setup
-- [ ] Implement `UpsertActor(tmdbID int, name string)`
-- [ ] Implement `CreateCostarEdge(actorA, actorB, movieTitle, movieID, year)`
-- [ ] Implement `ShortestPath(actorA, actorB string)` using Cypher `shortestPath`
-- [ ] Implement `SearchActors(prefix string, limit int)` — prefix autocomplete via full-text index
+- [x] Create `internal/graph/` with connection pool setup
+- [x] Implement `UpsertActor(tmdbID int, name string)`
+- [x] Implement `CreateCostarEdge(actorA, actorB, movieTitle, movieID)`
+- [x] Implement `ShortestPath(actorA, actorB string)` using Cypher `shortestPath`
+- [x] Implement `SearchActors(prefix string, limit int)` — prefix autocomplete via full-text index
     - Uses Neo4j full-text index with query like `Leo*` for prefix matching
     - Returns top N matches sorted by relevance
     - Future enhancement: add Levenshtein-based fuzzy matching for typo tolerance
 - [ ] Implement `GetStats()` — counts, most connected, avg degree
-- [ ] Add Neo4j constraints: unique on `Actor.tmdb_id`
-- [ ] Add Neo4j index: full-text index on `Actor.name` for prefix search
-- [ ] Connection health check method for readiness probe
-- [ ] All queries use parameterized Cypher (no string interpolation — Cypher injection prevention)
+- [x] Add Neo4j constraints: unique on `Actor.tmdb_id`
+- [x] Add Neo4j index: full-text index on `Actor.name` for prefix search
+- [x] Connection health check method for readiness probe
+- [x] All queries use parameterized Cypher (no string interpolation — Cypher injection prevention)
 
 ### 1.3 Ingestion CLI
 

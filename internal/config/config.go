@@ -16,8 +16,15 @@ type ClientConfig struct {
 	BaseBackoff time.Duration
 }
 
+type DBConfig struct {
+	URI  string
+	User string
+	Pass string
+}
+
 type Config struct {
 	Client ClientConfig
+	DB     DBConfig
 }
 
 func Load() (*Config, error) {
@@ -58,6 +65,24 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("invalid base backoff: %w", err)
 	}
 	cfg.Client.BaseBackoff = baseBackoff
+
+	uri, err := getEnvString("NEO4J_URI")
+	if err != nil {
+		return nil, fmt.Errorf("Missing Env: %w", err)
+	}
+	cfg.DB.URI = uri
+
+	user, err := getEnvString("NEO4J_USER")
+	if err != nil {
+		return nil, fmt.Errorf("Missing Env: %w", err)
+	}
+	cfg.DB.User = user
+
+	pass, err := getEnvString("NEO4J_PASSWORD")
+	if err != nil {
+		return nil, fmt.Errorf("Missing Env: %w", err)
+	}
+	cfg.DB.Pass = pass
 
 	return &cfg, nil
 }

@@ -38,7 +38,7 @@ test: ## Run unit tests
 	go test ./...
 
 .PHONY: test-integration
-test-integration: ## Run integration tests (requires TMDB_API_TOKEN)
+test-integration: ## Run integration tests (requires TMDB_API_TOKEN and Docker)
 	go test -tags=integration ./...
 
 .PHONY: coverage
