@@ -59,14 +59,13 @@ degrees/
 
 ### 1.1 TMDb Client
 
-- [ ] Create `internal/tmdb/` client with API key config
-- [ ] Implement `GetPopularMovies(page int)` with pagination (MVP)
-- [ ] Implement `GetDiscoverMovies(page int, filters)` for broader catalog coverage (post-MVP)
-- [ ] Implement `GetMovieCredits(movieID int)` returning cast list
+- [x] Create `internal/tmdb/` client with API key config
+- [x] Implement `GetPopularMovies(page int)` with pagination (MVP)
+- [x] Implement `GetMovieCast(movieID int)` returning cast list
     - Accept a `maxCast` parameter to cap pairwise edge explosion (default: top 20 billed)
-- [ ] Add rate limiter: token bucket at 40 requests per 10 seconds
-- [ ] Add retry with exponential backoff on 429s
-- [ ] Write integration tests against TMDb (skippable via build tag)
+- [x] Add rate limiter: token bucket at 40 requests per 10 seconds
+- [x] Add retry with exponential backoff on 429s
+- [x] Write integration tests against TMDb (skippable via build tag)
 
 ### 1.2 Neo4j Graph Layer
 

@@ -38,8 +38,7 @@ test: ## Run unit tests
 	go test ./...
 
 .PHONY: test-integration
-test-integration: ## Run integration tests (requires running Neo4j)
-	@echo "TODO: integration tests not yet implemented"
+test-integration: ## Run integration tests (requires TMDB_API_TOKEN)
 	go test -tags=integration ./...
 
 .PHONY: coverage
