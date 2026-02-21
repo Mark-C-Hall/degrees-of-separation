@@ -1,0 +1,26 @@
+services:
+  server:
+    build:
+      dockerfile: dockerfile.dev
+    ports:
+      - "8080:8080"
+    develop:
+      watch:
+        - path: ./
+          action: rebuild
+
+  neo4j:
+    image: neo4j:latest
+    volumes:
+      - neo4j-data:/data
+      - neo4j-logs:/logs
+    environment:
+      - NEO4J_AUTH=neo4j/devpassword
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    restart: unless-stopped
+
+volumes:
+  neo4j-data:
+  neo4j-logs:

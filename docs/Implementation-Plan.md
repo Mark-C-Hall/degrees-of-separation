@@ -42,21 +42,20 @@ degrees/
 
 ### 1.0 Dev Environment
 
-- [ ] Create `docker-compose.dev.yaml` with Neo4j 5 service
-    - Image: `neo4j:5`
+- [x] Create `docker-compose.yaml` with Neo4j 5 service
+    - Image: `neo4j:latest`
     - Ports: `7474:7474` (browser UI), `7687:7687` (bolt)
     - Environment: `NEO4J_AUTH=neo4j/devpassword`
     - Named volume for data persistence across restarts
-- [ ] Create `Makefile` with targets:
-    - `dev-up` — start compose in background
-    - `dev-down` — stop compose
-    - `dev-reset` — stop compose, remove volumes, restart (clean slate)
-    - `ingest` — run ingestion CLI against local Neo4j
-    - `seed` — ingest a small dataset (e.g., 5 pages) for quick local dev
-    - `test` — run unit tests
-    - `test-integration` — run integration tests (requires running Neo4j)
-- [ ] Add `.env.example` with local defaults (`NEO4J_URI`, `NEO4J_USER`, `NEO4J_PASSWORD`, `TMDB_API_KEY`)
-- [ ] Document dev setup in `README.md` (clone → fill in `.env` → `make dev-up` → `make seed` → `go run ./cmd/server`)
+- [x] Create `Makefile` with targets:
+    - **Dev environment:** `up`, `down`, `reset` — manage local Neo4j via Docker Compose
+    - **Data:** `ingest` — run full ingestion; `seed` — ingest small dataset for quick dev
+    - **Go development:** `build`, `run`, `fmt`, `vet`, `fix`, `tidy`, `clean`
+    - **Testing:** `test` — unit tests; `test-integration` — integration tests (requires Neo4j); `coverage` — tests with HTML coverage report
+    - **Quality:** `validate` — format, vet, and test in one command
+    - `help` — list all targets (default)
+- [x] Add `.env.example` with local defaults (`NEO4J_URI`, `NEO4J_USER`, `NEO4J_PASSWORD`, `TMDB_API_KEY`)
+- [x] Document dev setup in `README.md` (clone → fill in `.env` → `make up` → `make seed`)
 
 ### 1.1 TMDb Client
 

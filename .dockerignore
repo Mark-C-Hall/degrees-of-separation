@@ -1,0 +1,17 @@
+# Exclude markdown files and license
+*.md
+LICENSE
+
+# Exclude locally vendored dependencies.
+vendor/
+
+# Exclude "build-time" ignore files.
+.dockerignore
+
+# Exclude git history and configuration.
+.gitignore
+.git/
+
+# Exclude other docker files
+dockerfile*
+docker-compose.yml

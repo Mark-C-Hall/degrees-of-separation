@@ -7,20 +7,20 @@ Built with Go, Neo4j, and HTMX. Data sourced from [TMDb](https://www.themoviedb.
 ## Quick Start
 
 ```bash
-# Clone and configure
-cp .env.example .env  # Add your TMDb API key
-
-# Start local Neo4j
-make dev-up
-
-# Seed a small dataset
-make seed
-
-# Run the server
-go run ./cmd/server
+cp .env.example .env  # add your TMDb API key
+make up               # start Neo4j and server
+make seed             # load a small dataset
 ```
 
-Then open [http://localhost:8080](http://localhost:8080).
+Server at http://localhost:8080, Neo4j browser at http://localhost:7474.
+
+For live reload during development:
+
+```bash
+make watch
+```
+
+Run `make help` to see all available targets.
 
 ## Tech Stack
 
