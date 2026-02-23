@@ -1,11 +1,44 @@
 package config
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
+
+// loadDotEnv reads a .env file and sets any variable not already present in
+// the environment. It silently does nothing if the file doesn't exist.
+func loadDotEnv(path string) error {
+	f, err := os.Open(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		if os.Getenv(key) == "" {
+			os.Setenv(key, value)
+		}
+	}
+	return scanner.Err()
+}
 
 type ClientConfig struct {
 	APIToken    string
@@ -28,6 +61,10 @@ type Config struct {
 }
 
 func Load() (*Config, error) {
+	if err := loadDotEnv(".env"); err != nil {
+		return nil, fmt.Errorf("error loading .env: %w", err)
+	}
+
 	cfg := Config{}
 
 	token, err := getEnvString("TMDB_API_TOKEN")
