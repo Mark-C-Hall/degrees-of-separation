@@ -77,7 +77,7 @@ degrees/
     - Uses Neo4j full-text index with query like `Leo*` for prefix matching
     - Returns top N matches sorted by relevance
     - Future enhancement: add Levenshtein-based fuzzy matching for typo tolerance
-- [ ] Implement `GetStats()` — counts, most connected, avg degree
+- [x] Implement `GetStats()` — counts, most connected, avg degree
 - [x] Add Neo4j constraints: unique on `Actor.tmdb_id`
 - [x] Add Neo4j index: full-text index on `Actor.name` for prefix search
 - [x] Connection health check method for readiness probe
@@ -85,12 +85,12 @@ degrees/
 
 ### 1.3 Ingestion CLI
 
-- [ ] Create `cmd/ingest/` entrypoint
-- [ ] Accept flags: `--pages` (how many TMDb pages to ingest), `--max-cast` (cast cap per movie), `--resume`
-- [ ] For each movie: fetch cast, upsert actors, create pairwise edges (up to `maxCast`)
-- [ ] Store ingestion watermark in Neo4j (last page processed) for resumability
-- [ ] Log progress: movies processed, actors created, edges created
-- [ ] Graceful shutdown on SIGINT (finish current movie, then stop)
+- [x] Create `cmd/ingest/` entrypoint
+- [x] Accept flags: `--pages` (how many TMDb pages to ingest), `--max-cast` (cast cap per movie), `--resume`
+- [x] For each movie: fetch cast, upsert actors, create pairwise edges (up to `maxCast`)
+- [x] Store ingestion watermark in Neo4j (last page processed) for resumability
+- [x] Log progress: movies processed, actors created, edges created
+- [x] Graceful shutdown on SIGINT (finish current movie, then stop)
 
 ## Phase 2 — Web Server
 

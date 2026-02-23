@@ -5,6 +5,8 @@ package graph
 import (
 	"context"
 	"fmt"
+	"log"
+	"os"
 	"testing"
 	"time"
 
@@ -12,23 +14,23 @@ import (
 	tcneo4j "github.com/testcontainers/testcontainers-go/modules/neo4j"
 
 	"github.com/mark-c-hall/degrees-of-separation/internal/config"
+	"github.com/mark-c-hall/degrees-of-separation/internal/models"
 )
 
 var testDriver *Driver
 
-func setupContainer(t *testing.T) {
-	t.Helper()
+func TestMain(m *testing.M) {
 	ctx := context.Background()
 
 	container, err := tcneo4j.Run(ctx, "neo4j:5", tcneo4j.WithoutAuthentication())
 	if err != nil {
-		t.Fatalf("failed to start neo4j container: %v", err)
+		log.Fatalf("failed to start neo4j container: %v", err)
 	}
-	t.Cleanup(func() { container.Terminate(context.Background()) })
+	defer container.Terminate(ctx)
 
 	boltURL, err := container.BoltUrl(ctx)
 	if err != nil {
-		t.Fatalf("failed to get bolt url: %v", err)
+		log.Fatalf("failed to get bolt url: %v", err)
 	}
 
 	cfg := config.Config{
@@ -49,18 +51,19 @@ func setupContainer(t *testing.T) {
 		time.Sleep(500 * time.Millisecond)
 	}
 	if err != nil {
-		t.Fatalf("failed to create driver: %v", err)
+		log.Fatalf("failed to create driver: %v", err)
 	}
-	t.Cleanup(func() { d.Close(context.Background()) })
+	defer d.Close(ctx)
 
 	if err = d.SetupSchema(ctx); err != nil {
-		t.Fatalf("failed to setup schema: %v", err)
+		log.Fatalf("failed to setup schema: %v", err)
 	}
 
 	// Wait for the fulltext index to come online
 	time.Sleep(2 * time.Second)
 
 	testDriver = d
+	os.Exit(m.Run())
 }
 
 func clearGraph(t *testing.T) {
@@ -74,7 +77,6 @@ func clearGraph(t *testing.T) {
 }
 
 func TestSetupSchema_Idempotent(t *testing.T) {
-	setupContainer(t)
 	ctx := context.Background()
 
 	// Running schema setup a second time should not error
@@ -84,11 +86,10 @@ func TestSetupSchema_Idempotent(t *testing.T) {
 }
 
 func TestUpsertActor(t *testing.T) {
-	setupContainer(t)
 	clearGraph(t)
 	ctx := context.Background()
 
-	actor := Actor{TmdbID: 1, Name: "Brad Pitt"}
+	actor := models.Actor{TmdbID: 1, Name: "Brad Pitt"}
 	if err := testDriver.UpsertActor(ctx, actor); err != nil {
 		t.Fatalf("UpsertActor failed: %v", err)
 	}
@@ -122,20 +123,20 @@ func TestUpsertActor(t *testing.T) {
 }
 
 func TestCreateCostarEdge(t *testing.T) {
-	setupContainer(t)
 	clearGraph(t)
 	ctx := context.Background()
 
 	// Create two actors
-	testDriver.UpsertActor(ctx, Actor{TmdbID: 1, Name: "Brad Pitt"})
-	testDriver.UpsertActor(ctx, Actor{TmdbID: 2, Name: "Edward Norton"})
+	testDriver.UpsertActor(ctx, models.Actor{TmdbID: 1, Name: "Brad Pitt"})
+	testDriver.UpsertActor(ctx, models.Actor{TmdbID: 2, Name: "Edward Norton"})
 
-	if err := testDriver.CreateCostarEdge(ctx, 1, 2, 550, 1999, "Fight Club"); err != nil {
+	fightClub := models.Movie{TmdbID: 550, Title: "Fight Club", Year: 1999}
+	if err := testDriver.CreateCostarEdge(ctx, 1, 2, fightClub); err != nil {
 		t.Fatalf("CreateCostarEdge failed: %v", err)
 	}
 
 	// Creating the same edge again should be idempotent
-	if err := testDriver.CreateCostarEdge(ctx, 1, 2, 550, 1999, "Fight Club"); err != nil {
+	if err := testDriver.CreateCostarEdge(ctx, 1, 2, fightClub); err != nil {
 		t.Fatalf("idempotent CreateCostarEdge failed: %v", err)
 	}
 
@@ -166,16 +167,15 @@ func TestCreateCostarEdge(t *testing.T) {
 }
 
 func TestShortestPath(t *testing.T) {
-	setupContainer(t)
 	clearGraph(t)
 	ctx := context.Background()
 
 	// Build a chain: A --movie1-- B --movie2-- C
-	testDriver.UpsertActor(ctx, Actor{TmdbID: 1, Name: "Actor A"})
-	testDriver.UpsertActor(ctx, Actor{TmdbID: 2, Name: "Actor B"})
-	testDriver.UpsertActor(ctx, Actor{TmdbID: 3, Name: "Actor C"})
-	testDriver.CreateCostarEdge(ctx, 1, 2, 100, 2000, "Movie One")
-	testDriver.CreateCostarEdge(ctx, 2, 3, 200, 2010, "Movie Two")
+	testDriver.UpsertActor(ctx, models.Actor{TmdbID: 1, Name: "Actor A"})
+	testDriver.UpsertActor(ctx, models.Actor{TmdbID: 2, Name: "Actor B"})
+	testDriver.UpsertActor(ctx, models.Actor{TmdbID: 3, Name: "Actor C"})
+	testDriver.CreateCostarEdge(ctx, 1, 2, models.Movie{TmdbID: 100, Title: "Movie One", Year: 2000})
+	testDriver.CreateCostarEdge(ctx, 2, 3, models.Movie{TmdbID: 200, Title: "Movie Two", Year: 2010})
 
 	steps, err := testDriver.ShortestPath(ctx, 1, 3)
 	if err != nil {
@@ -205,13 +205,12 @@ func TestShortestPath(t *testing.T) {
 }
 
 func TestShortestPath_NoPath(t *testing.T) {
-	setupContainer(t)
 	clearGraph(t)
 	ctx := context.Background()
 
 	// Two disconnected actors
-	testDriver.UpsertActor(ctx, Actor{TmdbID: 1, Name: "Actor A"})
-	testDriver.UpsertActor(ctx, Actor{TmdbID: 2, Name: "Actor B"})
+	testDriver.UpsertActor(ctx, models.Actor{TmdbID: 1, Name: "Actor A"})
+	testDriver.UpsertActor(ctx, models.Actor{TmdbID: 2, Name: "Actor B"})
 
 	steps, err := testDriver.ShortestPath(ctx, 1, 2)
 	if err != nil {
@@ -223,13 +222,12 @@ func TestShortestPath_NoPath(t *testing.T) {
 }
 
 func TestSearchActors(t *testing.T) {
-	setupContainer(t)
 	clearGraph(t)
 	ctx := context.Background()
 
-	testDriver.UpsertActor(ctx, Actor{TmdbID: 1, Name: "Leonardo DiCaprio"})
-	testDriver.UpsertActor(ctx, Actor{TmdbID: 2, Name: "Leon Kennedy"})
-	testDriver.UpsertActor(ctx, Actor{TmdbID: 3, Name: "Brad Pitt"})
+	testDriver.UpsertActor(ctx, models.Actor{TmdbID: 1, Name: "Leonardo DiCaprio"})
+	testDriver.UpsertActor(ctx, models.Actor{TmdbID: 2, Name: "Leon Kennedy"})
+	testDriver.UpsertActor(ctx, models.Actor{TmdbID: 3, Name: "Brad Pitt"})
 
 	// Fulltext index needs a moment to index new data
 	time.Sleep(2 * time.Second)
@@ -253,12 +251,11 @@ func TestSearchActors(t *testing.T) {
 }
 
 func TestSearchActors_Limit(t *testing.T) {
-	setupContainer(t)
 	clearGraph(t)
 	ctx := context.Background()
 
 	for i := range 5 {
-		testDriver.UpsertActor(ctx, Actor{TmdbID: i + 1, Name: fmt.Sprintf("Test Actor %d", i+1)})
+		testDriver.UpsertActor(ctx, models.Actor{TmdbID: i + 1, Name: fmt.Sprintf("Test Actor %d", i+1)})
 	}
 
 	time.Sleep(2 * time.Second)
@@ -273,7 +270,6 @@ func TestSearchActors_Limit(t *testing.T) {
 }
 
 func TestGetStats(t *testing.T) {
-	setupContainer(t)
 	clearGraph(t)
 	ctx := context.Background()
 
@@ -287,12 +283,12 @@ func TestGetStats(t *testing.T) {
 	}
 
 	// Add data: A connected to B and C, B connected to C
-	testDriver.UpsertActor(ctx, Actor{TmdbID: 1, Name: "Actor A"})
-	testDriver.UpsertActor(ctx, Actor{TmdbID: 2, Name: "Actor B"})
-	testDriver.UpsertActor(ctx, Actor{TmdbID: 3, Name: "Actor C"})
-	testDriver.CreateCostarEdge(ctx, 1, 2, 100, 2000, "Movie One")
-	testDriver.CreateCostarEdge(ctx, 1, 3, 200, 2005, "Movie Two")
-	testDriver.CreateCostarEdge(ctx, 2, 3, 300, 2010, "Movie Three")
+	testDriver.UpsertActor(ctx, models.Actor{TmdbID: 1, Name: "Actor A"})
+	testDriver.UpsertActor(ctx, models.Actor{TmdbID: 2, Name: "Actor B"})
+	testDriver.UpsertActor(ctx, models.Actor{TmdbID: 3, Name: "Actor C"})
+	testDriver.CreateCostarEdge(ctx, 1, 2, models.Movie{TmdbID: 100, Title: "Movie One", Year: 2000})
+	testDriver.CreateCostarEdge(ctx, 1, 3, models.Movie{TmdbID: 200, Title: "Movie Two", Year: 2005})
+	testDriver.CreateCostarEdge(ctx, 2, 3, models.Movie{TmdbID: 300, Title: "Movie Three", Year: 2010})
 
 	stats, err = testDriver.GetStats(ctx)
 	if err != nil {
@@ -311,8 +307,131 @@ func TestGetStats(t *testing.T) {
 	}
 }
 
+func TestGetLastIngestedPage_EmptyGraph(t *testing.T) {
+	clearGraph(t)
+	ctx := context.Background()
+
+	page, err := testDriver.GetLastIngestedPage(ctx)
+	if err != nil {
+		t.Fatalf("GetLastIngestedPage failed: %v", err)
+	}
+	if page != 0 {
+		t.Errorf("expected 0 on empty graph, got %d", page)
+	}
+}
+
+func TestSetAndGetLastIngestedPage(t *testing.T) {
+	clearGraph(t)
+	ctx := context.Background()
+
+	if err := testDriver.SetLastIngestedPage(ctx, 42); err != nil {
+		t.Fatalf("SetLastIngestedPage failed: %v", err)
+	}
+
+	page, err := testDriver.GetLastIngestedPage(ctx)
+	if err != nil {
+		t.Fatalf("GetLastIngestedPage failed: %v", err)
+	}
+	if page != 42 {
+		t.Errorf("expected 42, got %d", page)
+	}
+}
+
+func TestSetLastIngestedPage_Overwrites(t *testing.T) {
+	clearGraph(t)
+	ctx := context.Background()
+
+	testDriver.SetLastIngestedPage(ctx, 10)
+	testDriver.SetLastIngestedPage(ctx, 25)
+
+	page, err := testDriver.GetLastIngestedPage(ctx)
+	if err != nil {
+		t.Fatalf("GetLastIngestedPage failed: %v", err)
+	}
+	if page != 25 {
+		t.Errorf("expected 25 after overwrite, got %d", page)
+	}
+}
+
+func TestIngestMovieCast(t *testing.T) {
+	clearGraph(t)
+	ctx := context.Background()
+
+	movie := models.Movie{TmdbID: 550, Title: "Fight Club", Year: 1999}
+	cast := []models.Actor{
+		{TmdbID: 1, Name: "Brad Pitt"},
+		{TmdbID: 2, Name: "Edward Norton"},
+		{TmdbID: 3, Name: "Helena Bonham Carter"},
+	}
+
+	if err := testDriver.IngestMovieCast(ctx, movie, cast); err != nil {
+		t.Fatalf("IngestMovieCast failed: %v", err)
+	}
+
+	session := testDriver.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeRead})
+	defer session.Close(ctx)
+
+	// Verify 3 actor nodes
+	result, err := session.Run(ctx, "MATCH (a:Actor) RETURN count(a) AS c", nil)
+	if err != nil {
+		t.Fatalf("actor count query failed: %v", err)
+	}
+	record, err := result.Single(ctx)
+	if err != nil {
+		t.Fatalf("expected one record: %v", err)
+	}
+	actorCount, _ := record.Get("c")
+	if actorCount.(int64) != 3 {
+		t.Errorf("expected 3 actors, got %d", actorCount)
+	}
+
+	// Verify 3 edges (pairs: 1-2, 1-3, 2-3)
+	result, err = session.Run(ctx, "MATCH ()-[r:COSTARRED]->() RETURN count(r) AS c", nil)
+	if err != nil {
+		t.Fatalf("edge count query failed: %v", err)
+	}
+	record, err = result.Single(ctx)
+	if err != nil {
+		t.Fatalf("expected one record: %v", err)
+	}
+	edgeCount, _ := record.Get("c")
+	if edgeCount.(int64) != 3 {
+		t.Errorf("expected 3 edges, got %d", edgeCount)
+	}
+
+	// Idempotency: calling again should not create duplicate nodes or edges
+	if err := testDriver.IngestMovieCast(ctx, movie, cast); err != nil {
+		t.Fatalf("second IngestMovieCast failed: %v", err)
+	}
+
+	result, err = session.Run(ctx, "MATCH (a:Actor) RETURN count(a) AS c", nil)
+	if err != nil {
+		t.Fatalf("actor count query after re-ingest failed: %v", err)
+	}
+	record, err = result.Single(ctx)
+	if err != nil {
+		t.Fatalf("expected one record: %v", err)
+	}
+	actorCount, _ = record.Get("c")
+	if actorCount.(int64) != 3 {
+		t.Errorf("expected 3 actors after re-ingest, got %d", actorCount)
+	}
+
+	result, err = session.Run(ctx, "MATCH ()-[r:COSTARRED]->() RETURN count(r) AS c", nil)
+	if err != nil {
+		t.Fatalf("edge count query after re-ingest failed: %v", err)
+	}
+	record, err = result.Single(ctx)
+	if err != nil {
+		t.Fatalf("expected one record: %v", err)
+	}
+	edgeCount, _ = record.Get("c")
+	if edgeCount.(int64) != 3 {
+		t.Errorf("expected 3 edges after re-ingest, got %d", edgeCount)
+	}
+}
+
 func TestVerifyConnectivity(t *testing.T) {
-	setupContainer(t)
 	ctx := context.Background()
 
 	if err := testDriver.VerifyConnectivity(ctx); err != nil {

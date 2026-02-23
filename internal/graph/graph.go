@@ -7,19 +7,15 @@ import (
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j"
 
 	"github.com/mark-c-hall/degrees-of-separation/internal/config"
+	"github.com/mark-c-hall/degrees-of-separation/internal/models"
 )
 
 type Driver struct {
 	driver neo4j.Driver
 }
 
-type Actor struct {
-	TmdbID int
-	Name   string
-}
-
 type PathStep struct {
-	Actor      *Actor
+	Actor      *models.Actor
 	MovieTitle string
 	MovieYear  int
 }
@@ -73,7 +69,7 @@ func (d *Driver) VerifyConnectivity(ctx context.Context) error {
 	return d.driver.VerifyConnectivity(ctx)
 }
 
-func (d *Driver) UpsertActor(ctx context.Context, actor Actor) error {
+func (d *Driver) UpsertActor(ctx context.Context, actor models.Actor) error {
 	cypher := "MERGE (a:Actor {tmdb_id: $id}) SET a.name = $name"
 	params := map[string]any{"id": actor.TmdbID, "name": actor.Name}
 
@@ -88,7 +84,7 @@ func (d *Driver) UpsertActor(ctx context.Context, actor Actor) error {
 	return nil
 }
 
-func (d *Driver) CreateCostarEdge(ctx context.Context, actorA, actorB, movieID, year int, title string) error {
+func (d *Driver) CreateCostarEdge(ctx context.Context, actorA, actorB int, movie models.Movie) error {
 	cypher := `
 		MATCH (a:Actor {tmdb_id: $idA}), (b:Actor {tmdb_id: $idB})
 		MERGE (a)-[r:COSTARRED {tmdb_movie_id: $movieID}]->(b)
@@ -96,9 +92,9 @@ func (d *Driver) CreateCostarEdge(ctx context.Context, actorA, actorB, movieID, 
 	params := map[string]any{
 		"idA":     actorA,
 		"idB":     actorB,
-		"movieID": movieID,
-		"title":   title,
-		"year":    year,
+		"movieID": movie.TmdbID,
+		"title":   movie.Title,
+		"year":    movie.Year,
 	}
 
 	session := d.driver.NewSession(ctx, neo4j.SessionConfig{})
@@ -110,6 +106,57 @@ func (d *Driver) CreateCostarEdge(ctx context.Context, actorA, actorB, movieID, 
 	}
 
 	return nil
+}
+
+func (d *Driver) IngestMovieCast(ctx context.Context, movie models.Movie, cast []models.Actor) error {
+	actors := make([]map[string]any, len(cast))
+	for i, a := range cast {
+		actors[i] = map[string]any{"id": a.TmdbID, "name": a.Name}
+	}
+
+	n := len(cast)
+	pairs := make([]map[string]any, 0, n*(n-1)/2)
+	for i := 0; i < n-1; i++ {
+		for j := i + 1; j < n; j++ {
+			pairs = append(pairs, map[string]any{
+				"idA":     cast[i].TmdbID,
+				"idB":     cast[j].TmdbID,
+				"movieID": movie.TmdbID,
+				"title":   movie.Title,
+				"year":    movie.Year,
+			})
+		}
+	}
+
+	session := d.driver.NewSession(ctx, neo4j.SessionConfig{})
+	defer session.Close(ctx)
+
+	_, err := session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
+		_, err := tx.Run(ctx,
+			"UNWIND $actors AS a MERGE (act:Actor {tmdb_id: a.id}) SET act.name = a.name",
+			map[string]any{"actors": actors},
+		)
+		if err != nil {
+			return nil, fmt.Errorf("error batch upserting actors: %w", err)
+		}
+
+		if len(pairs) > 0 {
+			_, err = tx.Run(ctx,
+				`UNWIND $pairs AS p
+				 MATCH (a:Actor {tmdb_id: p.idA}), (b:Actor {tmdb_id: p.idB})
+				 MERGE (a)-[r:COSTARRED {tmdb_movie_id: p.movieID}]->(b)
+				 SET r.movie_title = p.title, r.year = p.year`,
+				map[string]any{"pairs": pairs},
+			)
+			if err != nil {
+				return nil, fmt.Errorf("error batch creating costar edges: %w", err)
+			}
+		}
+
+		return nil, nil
+	})
+
+	return err
 }
 
 func (d *Driver) ShortestPath(ctx context.Context, actorA, actorB int) ([]PathStep, error) {
@@ -142,7 +189,7 @@ func (d *Driver) ShortestPath(ctx context.Context, actorA, actorB int) ([]PathSt
 	for i, actor := range actors {
 		a := actor.(map[string]any)
 		id, _ := a["id"].(int64)
-		steps = append(steps, PathStep{Actor: &Actor{TmdbID: int(id), Name: a["name"].(string)}})
+		steps = append(steps, PathStep{Actor: &models.Actor{TmdbID: int(id), Name: a["name"].(string)}})
 		if i < len(movies) {
 			m := movies[i].(map[string]any)
 			year, _ := m["year"].(int64)
@@ -156,7 +203,7 @@ func (d *Driver) ShortestPath(ctx context.Context, actorA, actorB int) ([]PathSt
 	return steps, nil
 }
 
-func (d *Driver) SearchActors(ctx context.Context, prefix string, limit int) ([]Actor, error) {
+func (d *Driver) SearchActors(ctx context.Context, prefix string, limit int) ([]models.Actor, error) {
 	cypher := `
 		CALL db.index.fulltext.queryNodes("actor_name", $query)
 		YIELD node, score
@@ -173,12 +220,12 @@ func (d *Driver) SearchActors(ctx context.Context, prefix string, limit int) ([]
 		return nil, fmt.Errorf("error searching actors: %w", err)
 	}
 
-	var actors []Actor
+	var actors []models.Actor
 	for result.Next(ctx) {
 		record := result.Record()
 		id, _ := record.Get("id")
 		name, _ := record.Get("name")
-		actors = append(actors, Actor{
+		actors = append(actors, models.Actor{
 			TmdbID: int(id.(int64)),
 			Name:   name.(string),
 		})
@@ -188,6 +235,43 @@ func (d *Driver) SearchActors(ctx context.Context, prefix string, limit int) ([]
 	}
 
 	return actors, nil
+}
+
+func (d *Driver) GetLastIngestedPage(ctx context.Context) (int, error) {
+	cypher := "MATCH (s:IngestState) RETURN s.last_page AS page"
+
+	session := d.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeRead})
+	defer session.Close(ctx)
+
+	result, err := session.Run(ctx, cypher, nil)
+	if err != nil {
+		return 0, fmt.Errorf("error reading ingest state: %w", err)
+	}
+
+	record, err := result.Single(ctx)
+	if err != nil {
+		return 0, nil // no IngestState node yet (first run), or >1 nodes (shouldn't happen with MERGE)
+	}
+
+	page, _ := record.Get("page")
+	return int(page.(int64)), nil
+}
+
+func (d *Driver) SetLastIngestedPage(ctx context.Context, page int) error {
+	cypher := "MERGE (s:IngestState) SET s.last_page = $page"
+	params := map[string]any{"page": page}
+
+	session := d.driver.NewSession(ctx, neo4j.SessionConfig{})
+	defer session.Close(ctx)
+
+	_, err := session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
+		_, err := tx.Run(ctx, cypher, params)
+		if err != nil {
+			return nil, fmt.Errorf("error saving ingest state: %w", err)
+		}
+		return nil, nil
+	})
+	return err
 }
 
 func (d *Driver) GetStats(ctx context.Context) (*Stats, error) {

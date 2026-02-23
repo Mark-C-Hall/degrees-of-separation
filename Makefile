@@ -78,12 +78,10 @@ reset: ## Stop dev environment, remove volumes, restart clean
 
 .PHONY: ingest
 ingest: ## Run full ingestion against local Neo4j
-	@echo "TODO: ingestion not yet implemented"
 	go run $(CMD_INGEST)
 
 .PHONY: seed
 seed: ## Ingest a small dataset for quick local dev
-	@echo "TODO: seed not yet implemented"
 	go run $(CMD_INGEST) --pages=$(SEED_PAGES)
 
 # ── Help ──────────────────────────────────────────────────────────────

@@ -33,22 +33,22 @@ func TestGetPopularMovies(t *testing.T) {
 	client := newTestClient(t)
 	ctx := context.Background()
 
-	resp, err := client.GetPopularMovies(ctx, 1)
+	totalPages, movies, err := client.GetPopularMovies(ctx, 1)
 	if err != nil {
 		t.Fatalf("GetPopularMovies returned error: %v", err)
 	}
 
-	if len(resp.Results) == 0 {
+	if len(movies) == 0 {
 		t.Fatal("expected at least one movie result, got none")
 	}
 
-	if resp.TotalPages == 0 {
+	if totalPages == 0 {
 		t.Fatal("expected TotalPages > 0")
 	}
 
-	for _, movie := range resp.Results {
-		if movie.ID == 0 {
-			t.Error("movie has zero ID")
+	for _, movie := range movies {
+		if movie.TmdbID == 0 {
+			t.Error("movie has zero TmdbID")
 		}
 		if movie.Title == "" {
 			t.Error("movie has empty title")
@@ -71,8 +71,8 @@ func TestGetMovieCast(t *testing.T) {
 	}
 
 	for _, member := range cast {
-		if member.ID == 0 {
-			t.Error("cast member has zero ID")
+		if member.TmdbID == 0 {
+			t.Error("cast member has zero TmdbID")
 		}
 		if member.Name == "" {
 			t.Error("cast member has empty name")

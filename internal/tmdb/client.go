@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"golang.org/x/time/rate"
 
 	"github.com/mark-c-hall/degrees-of-separation/internal/config"
+	"github.com/mark-c-hall/degrees-of-separation/internal/models"
 )
 
 const (
@@ -26,22 +29,22 @@ type Client struct {
 	BaseBackoff time.Duration
 }
 
-type MovieResults struct {
+type movieResult struct {
 	ID          int    `json:"id"`
 	Title       string `json:"title"`
 	ReleaseDate string `json:"release_date"`
 }
 
-type PopularResponse struct {
-	TotalPages int            `json:"total_pages"`
-	Results    []MovieResults `json:"results"`
+type popularResponse struct {
+	TotalPages int           `json:"total_pages"`
+	Results    []movieResult `json:"results"`
 }
 
-type CreditsResponse struct {
-	Cast []CastResults `json:"cast"`
+type creditsResponse struct {
+	Cast []castResult `json:"cast"`
 }
 
-type CastResults struct {
+type castResult struct {
 	ID   int    `json:"id"`
 	Name string `json:"name"`
 }
@@ -58,23 +61,32 @@ func NewClient(cfg config.Config) *Client {
 	return &client
 }
 
-func (c *Client) GetPopularMovies(ctx context.Context, page int) (*PopularResponse, error) {
+func (c *Client) GetPopularMovies(ctx context.Context, page int) (int, []models.Movie, error) {
 	url := fmt.Sprintf("%s/%s/movie/popular?page=%d", c.APIURL, API_VERSION, page)
 	resp, err := c.getHTTP(ctx, url)
 	if err != nil {
-		return nil, fmt.Errorf("error getting popular movies: %w", err)
+		return 0, nil, fmt.Errorf("error getting popular movies: %w", err)
 	}
 	defer resp.Body.Close()
 
-	var APIResponse PopularResponse
-	if err = json.NewDecoder(resp.Body).Decode(&APIResponse); err != nil {
-		return nil, fmt.Errorf("error decoding popular movie response: %w", err)
+	var apiResp popularResponse
+	if err = json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
+		return 0, nil, fmt.Errorf("error decoding popular movie response: %w", err)
 	}
 
-	return &APIResponse, nil
+	movies := make([]models.Movie, len(apiResp.Results))
+	for i, r := range apiResp.Results {
+		movies[i] = models.Movie{
+			TmdbID: r.ID,
+			Title:  r.Title,
+			Year:   parseYear(r.ReleaseDate),
+		}
+	}
+
+	return apiResp.TotalPages, movies, nil
 }
 
-func (c *Client) GetMovieCast(ctx context.Context, movieID, maxCast int) ([]CastResults, error) {
+func (c *Client) GetMovieCast(ctx context.Context, movieID, maxCast int) ([]models.Actor, error) {
 	url := fmt.Sprintf("%s/%s/movie/%d/credits", c.APIURL, API_VERSION, movieID)
 	resp, err := c.getHTTP(ctx, url)
 	if err != nil {
@@ -82,15 +94,30 @@ func (c *Client) GetMovieCast(ctx context.Context, movieID, maxCast int) ([]Cast
 	}
 	defer resp.Body.Close()
 
-	var APIResponse CreditsResponse
-	if err = json.NewDecoder(resp.Body).Decode(&APIResponse); err != nil {
+	var apiResp creditsResponse
+	if err = json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
 		return nil, fmt.Errorf("error decoding movie cast response: %w", err)
 	}
 
-	if maxCast > len(APIResponse.Cast) {
-		maxCast = len(APIResponse.Cast)
+	if maxCast > len(apiResp.Cast) {
+		maxCast = len(apiResp.Cast)
 	}
-	return APIResponse.Cast[:maxCast], nil
+
+	actors := make([]models.Actor, maxCast)
+	for i, member := range apiResp.Cast[:maxCast] {
+		actors[i] = models.Actor{TmdbID: member.ID, Name: member.Name}
+	}
+
+	return actors, nil
+}
+
+// parseYear extracts the year from a "YYYY-MM-DD" date string.
+func parseYear(date string) int {
+	if y, _, ok := strings.Cut(date, "-"); ok {
+		n, _ := strconv.Atoi(y)
+		return n
+	}
+	return 0
 }
 
 func (c *Client) getHTTP(ctx context.Context, url string) (*http.Response, error) {

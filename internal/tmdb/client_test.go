@@ -39,22 +39,22 @@ func TestGetPopularMovies_Success(t *testing.T) {
 	client, server := newTestServerClient(handler)
 	defer server.Close()
 
-	resp, err := client.GetPopularMovies(context.Background(), 1)
+	totalPages, movies, err := client.GetPopularMovies(context.Background(), 1)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if resp.TotalPages != 500 {
-		t.Errorf("expected TotalPages=500, got %d", resp.TotalPages)
+	if totalPages != 500 {
+		t.Errorf("expected TotalPages=500, got %d", totalPages)
 	}
-	if len(resp.Results) != 2 {
-		t.Fatalf("expected 2 results, got %d", len(resp.Results))
+	if len(movies) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(movies))
 	}
-	if resp.Results[0].ID != 123 || resp.Results[0].Title != "Fight Club" {
-		t.Errorf("unexpected first result: %+v", resp.Results[0])
+	if movies[0].TmdbID != 123 || movies[0].Title != "Fight Club" {
+		t.Errorf("unexpected first result: %+v", movies[0])
 	}
-	if resp.Results[0].ReleaseDate != "1999-10-15" {
-		t.Errorf("expected ReleaseDate=1999-10-15, got %s", resp.Results[0].ReleaseDate)
+	if movies[0].Year != 1999 {
+		t.Errorf("expected Year=1999, got %d", movies[0].Year)
 	}
 }
 
@@ -66,12 +66,12 @@ func TestGetPopularMovies_EmptyResults(t *testing.T) {
 	client, server := newTestServerClient(handler)
 	defer server.Close()
 
-	resp, err := client.GetPopularMovies(context.Background(), 999)
+	_, movies, err := client.GetPopularMovies(context.Background(), 999)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(resp.Results) != 0 {
-		t.Errorf("expected 0 results, got %d", len(resp.Results))
+	if len(movies) != 0 {
+		t.Errorf("expected 0 results, got %d", len(movies))
 	}
 }
 
@@ -100,6 +100,22 @@ func TestGetMovieCast_Success(t *testing.T) {
 	}
 	if cast[0].Name != "Brad Pitt" {
 		t.Errorf("expected first cast member to be Brad Pitt, got %s", cast[0].Name)
+	}
+}
+
+func TestParseYear(t *testing.T) {
+	tests := []struct {
+		input string
+		want  int
+	}{
+		{"1999-10-15", 1999},
+		{"2024-06-01", 2024},
+		{"", 0},
+	}
+	for _, tt := range tests {
+		if got := parseYear(tt.input); got != tt.want {
+			t.Errorf("parseYear(%q) = %d, want %d", tt.input, got, tt.want)
+		}
 	}
 }
 
