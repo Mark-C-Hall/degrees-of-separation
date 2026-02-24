@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"log/slog"
+	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -65,7 +66,10 @@ func RateLimit(limit rate.Limit, burst int, logger *slog.Logger) func(http.Handl
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ip := r.RemoteAddr
+			ip, _, err := net.SplitHostPort(r.RemoteAddr)
+			if err != nil {
+				ip = r.RemoteAddr
+			}
 
 			if !rl.getVisitor(ip).Allow() {
 				logger.WarnContext(r.Context(), "rate limit exceeded",
