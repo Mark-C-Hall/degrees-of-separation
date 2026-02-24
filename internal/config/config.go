@@ -31,6 +31,10 @@ type ServerConfig struct {
 	WriteTimeout    time.Duration
 	IdleTimeout     time.Duration
 	ShutdownTimeout time.Duration
+	RequestTimeout  time.Duration
+	CORSOrigin      string
+	RateLimitPerSec float64
+	RateBurst       int
 }
 
 type Config struct {
@@ -126,6 +130,30 @@ func Load() (*Config, error) {
 	}
 	cfg.Server.ShutdownTimeout = shutdownTimeout
 
+	requestTimeout, err := getEnvTimeDefault("REQUEST_TIMEOUT", "10s")
+	if err != nil {
+		return nil, fmt.Errorf("invalid request timeout: %w", err)
+	}
+	cfg.Server.RequestTimeout = requestTimeout
+
+	corsOrigin, err := getEnvStringDefault("CORS_ALLOWED_ORIGIN", "*")
+	if err != nil {
+		return nil, fmt.Errorf("invalid cors origin: %w", err)
+	}
+	cfg.Server.CORSOrigin = corsOrigin
+
+	rateLimitPerSec, err := getEnvFloatDefault("RATE_LIMIT_PER_SEC", "0.5")
+	if err != nil {
+		return nil, fmt.Errorf("invalid rate limit: %w", err)
+	}
+	cfg.Server.RateLimitPerSec = rateLimitPerSec
+
+	rateBurst, err := getEnvIntDefault("RATE_BURST", "5")
+	if err != nil {
+		return nil, fmt.Errorf("invalid rate burst: %w", err)
+	}
+	cfg.Server.RateBurst = rateBurst
+
 	return &cfg, nil
 }
 
@@ -195,6 +223,18 @@ func getEnvIntDefault(key, defaultValue string) (int, error) {
 		result = defaultValue
 	}
 	value, err := strconv.Atoi(result)
+	if err != nil {
+		return 0, fmt.Errorf("error parsing env: %w", err)
+	}
+	return value, nil
+}
+
+func getEnvFloatDefault(key, defaultValue string) (float64, error) {
+	result := os.Getenv(key)
+	if result == "" {
+		result = defaultValue
+	}
+	value, err := strconv.ParseFloat(result, 64)
 	if err != nil {
 		return 0, fmt.Errorf("error parsing env: %w", err)
 	}

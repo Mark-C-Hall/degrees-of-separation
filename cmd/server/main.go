@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -20,12 +21,14 @@ func main() {
 		log.Fatalf("failed to load config: %v", err)
 	}
 
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+
 	d, err := graph.NewDriver(context.Background(), *cfg)
 	if err != nil {
 		log.Fatalf("failed to initialize neo4j driver: %v", err)
 	}
 
-	h, err := handler.NewHandler(d, web.FS)
+	h, err := handler.NewHandler(d, web.FS, cfg.Server, logger)
 	if err != nil {
 		log.Fatalf("failed to initialize handler: %v", err)
 	}

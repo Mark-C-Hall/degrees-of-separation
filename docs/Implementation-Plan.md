@@ -103,11 +103,11 @@ degrees/
 
 ### 2.2 Middleware Stack
 
-- [ ] Request logging middleware (slog, structured, with request ID)
-- [ ] Panic recovery middleware
-- [ ] Request timeout middleware (10s default)
-- [ ] Per-IP rate limiter middleware (`golang.org/x/time/rate`, ~30 req/min)
-- [ ] CORS middleware
+- [x] Request logging middleware (slog, structured, with request ID)
+- [x] Panic recovery middleware
+- [x] Request timeout middleware (10s default)
+- [x] Per-IP rate limiter middleware (`golang.org/x/time/rate`, ~30 req/min)
+- [x] CORS middleware
 
 ### 2.3 Handlers
 
