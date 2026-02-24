@@ -3,42 +3,12 @@ package config
 import (
 	"bufio"
 	"fmt"
+	"log"
 	"os"
 	"strconv"
 	"strings"
 	"time"
 )
-
-// loadDotEnv reads a .env file and sets any variable not already present in
-// the environment. It silently does nothing if the file doesn't exist.
-func loadDotEnv(path string) error {
-	f, err := os.Open(path)
-	if os.IsNotExist(err) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		key, value, ok := strings.Cut(line, "=")
-		if !ok {
-			continue
-		}
-		key = strings.TrimSpace(key)
-		value = strings.TrimSpace(value)
-		if os.Getenv(key) == "" {
-			os.Setenv(key, value)
-		}
-	}
-	return scanner.Err()
-}
 
 type ClientConfig struct {
 	APIToken    string
@@ -55,23 +25,28 @@ type DBConfig struct {
 	Pass string
 }
 
+type ServerConfig struct {
+	Addr            string
+	ReadTimeout     time.Duration
+	WriteTimeout    time.Duration
+	IdleTimeout     time.Duration
+	ShutdownTimeout time.Duration
+}
+
 type Config struct {
 	Client ClientConfig
 	DB     DBConfig
+	Server ServerConfig
 }
 
 func Load() (*Config, error) {
 	if err := loadDotEnv(".env"); err != nil {
-		return nil, fmt.Errorf("error loading .env: %w", err)
+		log.Printf("warning: could not load .env: %v", err)
 	}
 
 	cfg := Config{}
 
-	token, err := getEnvString("TMDB_API_TOKEN")
-	if err != nil {
-		return nil, fmt.Errorf("Missing Env: %w", err)
-	}
-	cfg.Client.APIToken = token
+	cfg.Client.APIToken = os.Getenv("TMDB_API_TOKEN")
 
 	duration, err := getEnvTimeDefault("HTTP_CLIENT_TIMEOUT", "30s")
 	if err != nil {
@@ -105,29 +80,98 @@ func Load() (*Config, error) {
 
 	uri, err := getEnvString("NEO4J_URI")
 	if err != nil {
-		return nil, fmt.Errorf("Missing Env: %w", err)
+		return nil, fmt.Errorf("missing env: %w", err)
 	}
 	cfg.DB.URI = uri
 
 	user, err := getEnvString("NEO4J_USER")
 	if err != nil {
-		return nil, fmt.Errorf("Missing Env: %w", err)
+		return nil, fmt.Errorf("missing env: %w", err)
 	}
 	cfg.DB.User = user
 
 	pass, err := getEnvString("NEO4J_PASSWORD")
 	if err != nil {
-		return nil, fmt.Errorf("Missing Env: %w", err)
+		return nil, fmt.Errorf("missing env: %w", err)
 	}
 	cfg.DB.Pass = pass
 
+	port, err := getEnvStringDefault("PORT", "8080")
+	if err != nil {
+		return nil, fmt.Errorf("invalid port: %w", err)
+	}
+	cfg.Server.Addr = ":" + port
+
+	readTimeout, err := getEnvTimeDefault("SERVER_READ_TIMEOUT", "5s")
+	if err != nil {
+		return nil, fmt.Errorf("invalid read timeout: %w", err)
+	}
+	cfg.Server.ReadTimeout = readTimeout
+
+	writeTimeout, err := getEnvTimeDefault("SERVER_WRITE_TIMEOUT", "10s")
+	if err != nil {
+		return nil, fmt.Errorf("invalid write timeout: %w", err)
+	}
+	cfg.Server.WriteTimeout = writeTimeout
+
+	idleTimeout, err := getEnvTimeDefault("SERVER_IDLE_TIMEOUT", "120s")
+	if err != nil {
+		return nil, fmt.Errorf("invalid idle timeout: %w", err)
+	}
+	cfg.Server.IdleTimeout = idleTimeout
+
+	shutdownTimeout, err := getEnvTimeDefault("SERVER_SHUTDOWN_TIMEOUT", "10s")
+	if err != nil {
+		return nil, fmt.Errorf("invalid shutdown timeout: %w", err)
+	}
+	cfg.Server.ShutdownTimeout = shutdownTimeout
+
 	return &cfg, nil
+}
+
+// loadDotEnv reads a .env file and sets any variable not already present in
+// the environment. It silently does nothing if the file doesn't exist.
+func loadDotEnv(path string) error {
+	f, err := os.Open(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		if os.Getenv(key) == "" {
+			os.Setenv(key, value)
+		}
+	}
+	return scanner.Err()
 }
 
 func getEnvString(key string) (string, error) {
 	result := os.Getenv(key)
 	if result == "" {
 		return "", fmt.Errorf("%s not defined", key)
+	}
+	return result, nil
+}
+
+func getEnvStringDefault(key, defaultValue string) (string, error) {
+	result := os.Getenv(key)
+	if result == "" {
+		result = defaultValue
 	}
 	return result, nil
 }

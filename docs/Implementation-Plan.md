@@ -96,10 +96,10 @@ degrees/
 
 ### 2.1 HTTP Server Setup
 
-- [ ] Create `cmd/server/` entrypoint with graceful shutdown
-- [ ] Wire up `net/http` with `http.ServeMux` (stdlib is fine)
-- [ ] Embed `web/` directory with `go:embed`
-- [ ] Config via environment variables: `PORT`, `NEO4J_URI`, `NEO4J_USER`, `NEO4J_PASSWORD`
+- [x] Create `cmd/server/` entrypoint with graceful shutdown
+- [x] Wire up `net/http` with `http.ServeMux` (stdlib is fine)
+- [x] Embed `web/` directory with `go:embed`
+- [x] Config via environment variables: `PORT`, `NEO4J_URI`, `NEO4J_USER`, `NEO4J_PASSWORD`
 
 ### 2.2 Middleware Stack
 
