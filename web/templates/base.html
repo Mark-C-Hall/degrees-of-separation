@@ -1,15 +1,111 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Degrees of Separation</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
     <script src="https://unpkg.com/htmx.org@2.0.4" defer></script>
+    <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
+    <header class="site-header">
+        <div class="container">
+            <h1 class="site-title">Degrees of Separation</h1>
+            <p class="site-tagline">How connected is the movie world?</p>
+        </div>
+    </header>
+
     <main class="container">
-        <h1>Degrees of Separation</h1>
+        <div class="search-grid">
+            <div class="actor-search-wrapper">
+                <label for="actor-a-input">Actor A</label>
+                <input id="actor-a-input"
+                       type="text"
+                       name="q"
+                       autocomplete="off"
+                       placeholder="Search for an actor..."
+                       hx-get="/search"
+                       hx-trigger="keyup changed delay:300ms"
+                       hx-target="#actor-a-dropdown"
+                       hx-swap="innerHTML">
+                <input type="hidden" id="actor-a-id" name="a" value="">
+                <div id="actor-a-dropdown" class="search-dropdown"></div>
+            </div>
+
+            <div class="actor-search-wrapper">
+                <label for="actor-b-input">Actor B</label>
+                <input id="actor-b-input"
+                       type="text"
+                       name="q"
+                       autocomplete="off"
+                       placeholder="Search for an actor..."
+                       value="Kevin Bacon"
+                       hx-get="/search"
+                       hx-trigger="keyup changed delay:300ms"
+                       hx-target="#actor-b-dropdown"
+                       hx-swap="innerHTML">
+                <input type="hidden" id="actor-b-id" name="b" value="4724">
+                <div id="actor-b-dropdown" class="search-dropdown"></div>
+            </div>
+        </div>
+
+        <div class="find-btn-row">
+            <button class="find-btn"
+                    hx-get="/degrees"
+                    hx-include="#actor-a-id, #actor-b-id"
+                    hx-target="#results"
+                    hx-swap="innerHTML"
+                    hx-indicator="#spinner"
+                    hx-on:htmx:before-request="return validateActors(event)">
+                Find Connection
+            </button>
+            <div id="spinner" class="htmx-indicator">
+                <span class="spinner-ring"></span>
+                <span>Searching...</span>
+            </div>
+        </div>
+
+        <div id="results"></div>
+
+        <section id="stats"
+                 hx-get="/stats"
+                 hx-trigger="load"
+                 hx-swap="innerHTML">
+            <div class="stats-skeleton">
+                <div class="skeleton-card"></div>
+                <div class="skeleton-card"></div>
+                <div class="skeleton-card"></div>
+            </div>
+        </section>
     </main>
+
+    <script>
+        function selectActor(el) {
+            const wrapper = el.closest('.actor-search-wrapper');
+            wrapper.querySelector('input[type=text]').value = el.dataset.name;
+            wrapper.querySelector('input[type=hidden]').value = el.dataset.tmdbId;
+            el.closest('.search-dropdown').innerHTML = '';
+        }
+
+        function validateActors(event) {
+            const a = document.getElementById('actor-a-id').value;
+            const b = document.getElementById('actor-b-id').value;
+            if (!a || !b) {
+                event.preventDefault();
+                document.getElementById('results').innerHTML =
+                    '<div class="no-results">Select both actors from the search results first.</div>';
+                return false;
+            }
+        }
+
+        document.addEventListener('click', function(e) {
+            if (!e.target.closest('.actor-search-wrapper')) {
+                document.querySelectorAll('.search-dropdown').forEach(function(d) {
+                    d.innerHTML = '';
+                });
+            }
+        });
+    </script>
 </body>
 </html>

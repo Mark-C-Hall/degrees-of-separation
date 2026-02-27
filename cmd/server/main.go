@@ -28,6 +28,10 @@ func main() {
 		log.Fatalf("failed to initialize neo4j driver: %v", err)
 	}
 
+	if err := d.SetupSchema(context.Background()); err != nil {
+		log.Fatalf("failed to set up schema: %v", err)
+	}
+
 	h, err := handler.NewHandler(d, web.FS, cfg.Server, logger)
 	if err != nil {
 		log.Fatalf("failed to initialize handler: %v", err)

@@ -1,1 +1,31 @@
-{{define "degrees.html"}}{{end}}
+{{define "degrees.html"}}
+{{if .}}
+  {{if .SameActor}}
+    <div class="path-result">
+      <p class="degree-count"><strong>0</strong> degrees of separation</p>
+    </div>
+  {{else if .Steps}}
+    <div class="path-result">
+      <p class="degree-count">
+        <strong>{{.Degrees}}</strong>
+        {{if eq .Degrees 1}}degree{{else}}degrees{{end}} of separation
+      </p>
+      <div class="path-chain">
+        {{range .Steps}}
+          {{if .Actor}}
+            <span class="actor-node">{{.Actor.Name}}</span>
+          {{else}}
+            <span class="movie-connector">
+              <span class="connector-arrow">↓</span>
+              <span class="movie-label">{{.MovieTitle}} ({{.MovieYear}})</span>
+              <span class="connector-arrow">↓</span>
+            </span>
+          {{end}}
+        {{end}}
+      </div>
+    </div>
+  {{else}}
+    <div class="no-results">No connection found between these actors.</div>
+  {{end}}
+{{end}}
+{{end}}

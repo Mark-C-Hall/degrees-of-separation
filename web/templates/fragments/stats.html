@@ -1,1 +1,18 @@
-{{define "stats.html"}}{{end}}
+{{define "stats.html"}}
+{{if .}}
+<div class="stats-grid">
+  <div class="stat-card">
+    <span class="stat-value">{{commify .ActorCount}}</span>
+    <span class="stat-label">Actors</span>
+  </div>
+  <div class="stat-card">
+    <span class="stat-value">{{commify .EdgeCount}}</span>
+    <span class="stat-label">Connections</span>
+  </div>
+  <div class="stat-card">
+    <span class="stat-value">{{.MostConnectedActor}}</span>
+    <span class="stat-label">Most Connected</span>
+  </div>
+</div>
+{{end}}
+{{end}}

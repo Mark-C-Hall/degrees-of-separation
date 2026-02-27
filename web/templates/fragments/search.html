@@ -1,1 +1,15 @@
-{{define "search.html"}}{{end}}
+{{define "search.html"}}
+{{if .}}
+<ul class="search-results" role="listbox">
+  {{range .}}
+  <li role="option"
+      class="search-result-item"
+      data-tmdb-id="{{.TmdbID}}"
+      data-name="{{.Name}}"
+      onclick="selectActor(this)">
+    {{.Name}}
+  </li>
+  {{end}}
+</ul>
+{{end}}
+{{end}}

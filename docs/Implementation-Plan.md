@@ -114,20 +114,25 @@ degrees/
 - [x] `GET /` — render main page template
 - [x] `GET /search?q=` — return HTMX fragment with actor suggestions (prefix autocomplete)
 - [x] `GET /degrees?a=&b=` — return HTMX fragment with path result
+    - **Note:** if `a` and `b` are the same actor, return "0 degrees" immediately (no graph query needed)
 - [x] `GET /stats` — return HTMX fragment with graph stats
 - [x] `GET /healthz` — return 200
 - [x] `GET /readyz` — check Neo4j connectivity, return 200/503
 
 ### 2.4 Templates & Frontend
 
-- [ ] Base layout template (HTML head, HTMX script tag, minimal CSS)
-- [ ] Search input component with `hx-get="/search"` and `hx-trigger="keyup changed delay:300ms"`
+- [x] Base layout template (HTML head, HTMX script tag, CSS) — dark cinematic theme with Pico CSS + custom overrides
+- [x] Search input component with `hx-get="/search"` and `hx-trigger="keyup changed delay:300ms"`
     - Dropdown renders clickable actor names below the input
     - Selecting an actor populates a hidden input with the actor's `tmdb_id`
-- [ ] Results display: chain of Actor → Movie → Actor → Movie → ... → Actor with names and years
-- [ ] Stats section loaded via `hx-get="/stats"` on page load
-- [ ] Error state fragments (no results, service unavailable)
-- [ ] Classless CSS framework (pico.css or similar) to avoid writing CSS
+- [x] Results display: vertical chain of Actor → Movie → Actor → Movie → ... → Actor with names and years
+- [x] Stats section loaded via `hx-get="/stats"` on page load; numbers formatted with commas
+- [x] No-results state for degrees (no path found between actors)
+- [x] Pico CSS dark theme as base framework
+
+**Fixes made outside plan scope (discovered during implementation):**
+- `SetupSchema` was never called by the server (only existed in tests); added to server startup — required for fulltext search index
+- `/static/` file server route was missing from `addRoutes`; CSS was being served as `text/plain`
 
 ## Phase 3 — Production Hardening
 
@@ -159,6 +164,7 @@ degrees/
 - [ ] Define app-level error types (`ErrNotFound`, `ErrNeo4jUnavailable`, `ErrRateLimited`)
 - [ ] Map errors to appropriate HTTP status codes in a central handler
 - [ ] HTMX error fragments that render user-friendly messages
+    - [ ] Service unavailable fragment (Neo4j down / 5xx) — use `HX-Retarget` + `HX-Reswap` headers to redirect into a shared `#error-banner` div
 - [ ] Never expose internal error details to the client
 
 ### 3.4 Testing

@@ -1,8 +1,11 @@
 package handler
 
 import (
+	"bytes"
 	"embed"
+	"fmt"
 	"html/template"
+	iofs "io/fs"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -16,24 +19,43 @@ import (
 
 const searchLimit = 15
 
+type pathResult struct {
+	Steps      []graph.PathStep
+	Degrees    int
+	SameActor  bool
+}
+
 type Handler struct {
 	db      *graph.Driver
-	fs      embed.FS
 	tmpl    *template.Template
 	logger  *slog.Logger
 	handler http.Handler
 }
 
+func commify(n int) string {
+	s := fmt.Sprintf("%d", n)
+	for i := len(s) - 3; i > 0; i -= 3 {
+		s = s[:i] + "," + s[i:]
+	}
+	return s
+}
+
 func NewHandler(db *graph.Driver, fs embed.FS, cfg config.ServerConfig, logger *slog.Logger) (*Handler, error) {
-	tmpl, err := template.ParseFS(fs, "templates/base.html", "templates/fragments/*.html")
+	funcs := template.FuncMap{"commify": commify}
+	tmpl, err := template.New("").Funcs(funcs).ParseFS(fs, "templates/base.html", "templates/fragments/*.html")
 	if err != nil {
 		return nil, err
 	}
 
-	h := &Handler{db: db, fs: fs, tmpl: tmpl, logger: logger}
+	staticFS, err := iofs.Sub(fs, "static")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create static sub-filesystem: %w", err)
+	}
+
+	h := &Handler{db: db, tmpl: tmpl, logger: logger}
 
 	mux := http.NewServeMux()
-	addRoutes(mux, h)
+	addRoutes(mux, h, staticFS)
 
 	var wrapped http.Handler = mux
 	wrapped = mw.Timeout(cfg.RequestTimeout)(wrapped)
@@ -50,7 +72,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.handler.ServeHTTP(w, r)
 }
 
-func addRoutes(mux *http.ServeMux, h *Handler) {
+func addRoutes(mux *http.ServeMux, h *Handler, staticFS iofs.FS) {
+	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticFS))))
 	mux.HandleFunc("/", h.indexHandler)
 	mux.HandleFunc("/search", h.searchHandler)
 	mux.HandleFunc("/degrees", h.degreesHandler)
@@ -64,10 +87,7 @@ func (h *Handler) indexHandler(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	if err := h.tmpl.ExecuteTemplate(w, "base.html", nil); err != nil {
-		h.logger.Error("failed to render index", "err", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
-	}
+	h.renderFragment(w, "base.html", nil)
 }
 
 func (h *Handler) searchHandler(w http.ResponseWriter, r *http.Request) {
@@ -106,6 +126,11 @@ func (h *Handler) degreesHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if idA == idB {
+		h.renderFragment(w, "degrees.html", pathResult{Degrees: 0, SameActor: true})
+		return
+	}
+
 	pathStep, err := h.db.ShortestPath(r.Context(), idA, idB)
 	if err != nil {
 		h.logger.Error("failed to get shortest path", "a", idA, "b", idB, "err", err)
@@ -113,7 +138,11 @@ func (h *Handler) degreesHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.renderFragment(w, "degrees.html", pathStep)
+	deg := 0
+	if len(pathStep) > 1 {
+		deg = (len(pathStep) - 1) / 2
+	}
+	h.renderFragment(w, "degrees.html", pathResult{Steps: pathStep, Degrees: deg})
 }
 
 func (h *Handler) statsHandler(w http.ResponseWriter, r *http.Request) {
@@ -128,10 +157,14 @@ func (h *Handler) statsHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) renderFragment(w http.ResponseWriter, name string, data any) {
-	if err := h.tmpl.ExecuteTemplate(w, name, data); err != nil {
+	var buf bytes.Buffer
+	if err := h.tmpl.ExecuteTemplate(&buf, name, data); err != nil {
 		h.logger.Error("failed to render fragment", "template", name, "err", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
 	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	buf.WriteTo(w)
 }
 
 func (h *Handler) healthHandler(w http.ResponseWriter, _ *http.Request) {
