@@ -111,12 +111,12 @@ degrees/
 
 ### 2.3 Handlers
 
-- [ ] `GET /` — render main page template
-- [ ] `GET /search?q=` — return HTMX fragment with actor suggestions (prefix autocomplete)
-- [ ] `GET /degrees?a=&b=` — return HTMX fragment with path result
-- [ ] `GET /stats` — return HTMX fragment with graph stats
-- [ ] `GET /healthz` — return 200
-- [ ] `GET /readyz` — check Neo4j connectivity, return 200/503
+- [x] `GET /` — render main page template
+- [x] `GET /search?q=` — return HTMX fragment with actor suggestions (prefix autocomplete)
+- [x] `GET /degrees?a=&b=` — return HTMX fragment with path result
+- [x] `GET /stats` — return HTMX fragment with graph stats
+- [x] `GET /healthz` — return 200
+- [x] `GET /readyz` — check Neo4j connectivity, return 200/503
 
 ### 2.4 Templates & Frontend
 
