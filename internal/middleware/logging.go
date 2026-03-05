@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"net/http"
 	"time"
+
+	"go.opentelemetry.io/otel/trace"
 )
 
 type contextKey string
@@ -23,6 +25,8 @@ func (w *statusResponseWriter) WriteHeader(code int) {
 	w.ResponseWriter.WriteHeader(code)
 }
 
+// Logging records one structured log line per request, including trace_id and
+// span_id when a span is present for log-trace correlation.
 func Logging(logger *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -35,14 +39,27 @@ func Logging(logger *slog.Logger) func(http.Handler) http.Handler {
 
 			next.ServeHTTP(wrapped, r)
 
-			logger.InfoContext(ctx, "request",
+			args := []any{
 				"method", r.Method,
 				"path", r.URL.Path,
 				"status", wrapped.status,
 				"duration_ms", time.Since(start).Milliseconds(),
 				"request_id", id,
 				"remote_addr", r.RemoteAddr,
-			)
+			}
+
+			// otelhttp (inner middleware) has already created the span by the
+			// time we log, so it is available in context on the way out.
+			span := trace.SpanFromContext(ctx)
+			sc := span.SpanContext()
+			if sc.IsValid() {
+				args = append(args,
+					"trace_id", sc.TraceID().String(),
+					"span_id", sc.SpanID().String(),
+				)
+			}
+
+			logger.InfoContext(ctx, "request", args...)
 		})
 	}
 }

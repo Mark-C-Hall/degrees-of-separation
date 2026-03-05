@@ -1,8 +1,19 @@
+// Package graph wraps the Neo4j driver with OTel instrumentation.
+// It imports only the OTel API, not the SDK — the SDK is wired in by
+// internal/telemetry.
 package graph
 
 import (
 	"context"
 	"fmt"
+	"time"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/metric"
+	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j"
 
@@ -10,8 +21,13 @@ import (
 	"github.com/mark-c-hall/degrees-of-separation/internal/models"
 )
 
+// Driver wraps the Neo4j driver with OTel tracing and metrics instruments.
 type Driver struct {
-	driver neo4j.Driver
+	driver        neo4j.Driver
+	tracer        trace.Tracer
+	queryDuration metric.Float64Histogram
+	actorsGauge   metric.Int64ObservableGauge
+	edgesGauge    metric.Int64ObservableGauge
 }
 
 type PathStep struct {
@@ -40,7 +56,50 @@ func NewDriver(ctx context.Context, cfg config.Config) (*Driver, error) {
 		return nil, fmt.Errorf("error authenticating into neo4j: %w", err)
 	}
 
-	return &Driver{driver: driver}, nil
+	d := &Driver{driver: driver}
+
+	// Instruments are resolved against the global providers set by internal/telemetry.
+	meter := otel.Meter("degrees-of-separation/graph")
+	d.tracer = otel.Tracer("degrees-of-separation/graph")
+
+	d.queryDuration, err = meter.Float64Histogram("neo4j.query.duration",
+		metric.WithUnit("s"),
+		metric.WithDescription("Duration of Neo4j Cypher queries"),
+		metric.WithExplicitBucketBoundaries(0.001, 0.005, 0.01, 0.05, 0.1, 0.25, 0.5, 1.0),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("creating query duration histogram: %w", err)
+	}
+
+	d.actorsGauge, err = meter.Int64ObservableGauge("graph.actors.total",
+		metric.WithDescription("Total number of Actor nodes in the graph"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("creating actors gauge: %w", err)
+	}
+
+	d.edgesGauge, err = meter.Int64ObservableGauge("graph.edges.total",
+		metric.WithDescription("Total number of COSTARRED edges in the graph"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("creating edges gauge: %w", err)
+	}
+
+	// Gauge callback fires on each Prometheus scrape, not per-request.
+	_, err = meter.RegisterCallback(func(ctx context.Context, o metric.Observer) error {
+		stats, err := d.GetStats(ctx)
+		if err != nil {
+			return nil // don't fail the scrape if the DB is temporarily down
+		}
+		o.ObserveInt64(d.actorsGauge, int64(stats.ActorCount))
+		o.ObserveInt64(d.edgesGauge, int64(stats.EdgeCount))
+		return nil
+	}, d.actorsGauge, d.edgesGauge)
+	if err != nil {
+		return nil, fmt.Errorf("registering gauge callback: %w", err)
+	}
+
+	return d, nil
 }
 
 func (d *Driver) SetupSchema(ctx context.Context) error {
@@ -108,7 +167,24 @@ func (d *Driver) CreateCostarEdge(ctx context.Context, actorA, actorB int, movie
 	return nil
 }
 
+// IngestMovieCast upserts actors and their co-star edges in a single write transaction.
 func (d *Driver) IngestMovieCast(ctx context.Context, movie models.Movie, cast []models.Actor) error {
+	cypher := `UNWIND $actors AS a MERGE (act:Actor {tmdb_id: a.id}) SET act.name = a.name`
+	start := time.Now()
+	ctx, span := d.tracer.Start(ctx, "neo4j.IngestMovieCast",
+		trace.WithSpanKind(trace.SpanKindClient),
+		trace.WithAttributes(
+			semconv.DBSystemNeo4j,
+			semconv.DBQueryText(cypher),
+			attribute.Int("cast.size", len(cast)),
+		),
+	)
+	defer func() {
+		d.queryDuration.Record(ctx, time.Since(start).Seconds(),
+			metric.WithAttributes(attribute.String("query_name", "IngestMovieCast")))
+		span.End()
+	}()
+
 	actors := make([]map[string]any, len(cast))
 	for i, a := range cast {
 		actors[i] = map[string]any{"id": a.TmdbID, "name": a.Name}
@@ -155,16 +231,40 @@ func (d *Driver) IngestMovieCast(ctx context.Context, movie models.Movie, cast [
 
 		return nil, nil
 	})
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return err
+	}
 
-	return err
+	span.SetAttributes(attribute.Int("pairs.count", len(pairs)))
+	return nil
 }
 
+// ShortestPath finds the shortest co-star chain between two actors.
 func (d *Driver) ShortestPath(ctx context.Context, actorA, actorB int) ([]PathStep, error) {
 	cypher := `
 		MATCH (a:Actor {tmdb_id: $idA}), (b:Actor {tmdb_id: $idB}),
 		      p = shortestPath((a)-[:COSTARRED*]-(b))
 		RETURN [n IN nodes(p) | {id: n.tmdb_id, name: n.name}] AS actors,
 		       [r IN relationships(p) | {title: r.movie_title, year: r.year}] AS movies`
+
+	start := time.Now()
+	ctx, span := d.tracer.Start(ctx, "neo4j.ShortestPath",
+		trace.WithSpanKind(trace.SpanKindClient),
+		trace.WithAttributes(
+			semconv.DBSystemNeo4j,
+			semconv.DBQueryText(cypher),
+			attribute.Int("actor_a", actorA),
+			attribute.Int("actor_b", actorB),
+		),
+	)
+	defer func() {
+		d.queryDuration.Record(ctx, time.Since(start).Seconds(),
+			metric.WithAttributes(attribute.String("query_name", "ShortestPath")))
+		span.End()
+	}()
+
 	params := map[string]any{"idA": actorA, "idB": actorB}
 
 	session := d.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeRead})
@@ -172,6 +272,8 @@ func (d *Driver) ShortestPath(ctx context.Context, actorA, actorB int) ([]PathSt
 
 	result, err := session.Run(ctx, cypher, params)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return nil, fmt.Errorf("error finding shortest path: %w", err)
 	}
 
@@ -200,9 +302,11 @@ func (d *Driver) ShortestPath(ctx context.Context, actorA, actorB int) ([]PathSt
 		}
 	}
 
+	span.SetAttributes(attribute.Int("result.steps", len(steps)))
 	return steps, nil
 }
 
+// SearchActors runs a fulltext index query against the actor_name index.
 func (d *Driver) SearchActors(ctx context.Context, prefix string, limit int) ([]models.Actor, error) {
 	cypher := `
 		CALL db.index.fulltext.queryNodes("actor_name", $query)
@@ -210,6 +314,22 @@ func (d *Driver) SearchActors(ctx context.Context, prefix string, limit int) ([]
 		RETURN node.tmdb_id AS id, node.name AS name
 		ORDER BY score DESC
 		LIMIT $limit`
+
+	start := time.Now()
+	ctx, span := d.tracer.Start(ctx, "neo4j.SearchActors",
+		trace.WithSpanKind(trace.SpanKindClient),
+		trace.WithAttributes(
+			semconv.DBSystemNeo4j,
+			semconv.DBQueryText(cypher),
+			attribute.String("search.prefix", prefix),
+		),
+	)
+	defer func() {
+		d.queryDuration.Record(ctx, time.Since(start).Seconds(),
+			metric.WithAttributes(attribute.String("query_name", "SearchActors")))
+		span.End()
+	}()
+
 	params := map[string]any{"query": prefix + "*", "limit": limit}
 
 	session := d.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeRead})
@@ -217,6 +337,8 @@ func (d *Driver) SearchActors(ctx context.Context, prefix string, limit int) ([]
 
 	result, err := session.Run(ctx, cypher, params)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return nil, fmt.Errorf("error searching actors: %w", err)
 	}
 
@@ -231,9 +353,12 @@ func (d *Driver) SearchActors(ctx context.Context, prefix string, limit int) ([]
 		})
 	}
 	if err = result.Err(); err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return nil, fmt.Errorf("error iterating actor results: %w", err)
 	}
 
+	span.SetAttributes(attribute.Int("result.count", len(actors)))
 	return actors, nil
 }
 
@@ -250,7 +375,7 @@ func (d *Driver) GetLastIngestedPage(ctx context.Context) (int, error) {
 
 	record, err := result.Single(ctx)
 	if err != nil {
-		return 0, nil // no IngestState node yet (first run), or >1 nodes (shouldn't happen with MERGE)
+		return 0, nil // no IngestState node yet (first run)
 	}
 
 	page, _ := record.Get("page")
@@ -274,6 +399,8 @@ func (d *Driver) SetLastIngestedPage(ctx context.Context, page int) error {
 	return err
 }
 
+// GetStats runs an aggregate Cypher query. Called from HTTP handlers and from
+// the async gauge callback on each Prometheus scrape.
 func (d *Driver) GetStats(ctx context.Context) (*Stats, error) {
 	cypher := `
 		OPTIONAL MATCH (a:Actor)
@@ -286,11 +413,27 @@ func (d *Driver) GetStats(ctx context.Context) (*Stats, error) {
 		LIMIT 1
 		RETURN actorCount, edgeCount, a.name AS topActor, rels AS topCount`
 
+	start := time.Now()
+	ctx, span := d.tracer.Start(ctx, "neo4j.GetStats",
+		trace.WithSpanKind(trace.SpanKindClient),
+		trace.WithAttributes(
+			semconv.DBSystemNeo4j,
+			semconv.DBQueryText(cypher),
+		),
+	)
+	defer func() {
+		d.queryDuration.Record(ctx, time.Since(start).Seconds(),
+			metric.WithAttributes(attribute.String("query_name", "GetStats")))
+		span.End()
+	}()
+
 	session := d.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeRead})
 	defer session.Close(ctx)
 
 	result, err := session.Run(ctx, cypher, nil)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return nil, fmt.Errorf("error getting stats: %w", err)
 	}
 

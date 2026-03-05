@@ -1,0 +1,48 @@
+// Discover all running Docker containers.
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+}
+
+// Attach the Compose service name as a Loki label.
+loki.relabel "service_label" {
+  forward_to = []
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "service"
+  }
+}
+
+// Tail stdout/stderr from every container.
+loki.source.docker "containers" {
+  host             = "unix:///var/run/docker.sock"
+  targets          = discovery.docker.containers.targets
+  forward_to       = [loki.process.extract_level.receiver]
+  relabeling_rules = loki.relabel.service_label.rules
+}
+
+// Parse JSON log lines and promote "level" as an indexed label.
+// Lines that are not valid JSON (e.g. plain-text startup messages) pass
+// through without a level label — that's fine.
+loki.process "extract_level" {
+  forward_to = [loki.write.local.receiver]
+
+  stage.json {
+    expressions = {
+      level = "level",
+    }
+  }
+
+  stage.labels {
+    values = {
+      level = "",
+    }
+  }
+}
+
+// Ship to local Loki.
+loki.write "local" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}

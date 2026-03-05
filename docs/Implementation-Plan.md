@@ -138,26 +138,33 @@ degrees/
 
 ### 3.1 Observability
 
-- [ ] Add OpenTelemetry SDK (`go.opentelemetry.io/otel`)
-- [ ] Instrument HTTP handlers with tracing spans
-- [ ] Instrument Neo4j queries with tracing spans
-- [ ] Add Prometheus metrics via `promhttp`:
-    - `http_requests_total` (counter, labels: method, path, status)
-    - `http_request_duration_seconds` (histogram)
+- [x] Add OpenTelemetry SDK (`go.opentelemetry.io/otel`)
+- [x] Instrument HTTP handlers with tracing spans (via `otelhttp` auto-instrumentation)
+- [x] Instrument Neo4j queries with tracing spans (manual spans in `graph.go`)
+- [x] Add Prometheus metrics via `promhttp`:
+    - `http_request_duration` (histogram) — emitted automatically by `otelhttp`
     - `neo4j_query_duration_seconds` (histogram, label: query_name)
-    - `graph_actors_total` (gauge, updated periodically)
-    - `graph_edges_total` (gauge)
-    - `ingest_movies_processed_total` (counter)
-- [ ] Export traces to Cloud Trace (OTLP exporter)
-- [ ] `GET /metrics` endpoint for Prometheus scraping
+    - `graph_actors_total` / `graph_edges_total` (observable gauges, polled on scrape)
+    - `http_requests_total` — **deferred**: `otelhttp` covers duration; a separate counter not yet added
+    - `ingest_movies_processed_total` — **deferred**: ingest CLI not yet OTel-instrumented
+- [x] OTLP trace exporter — sends to Tempo in dev; production endpoint is config-only swap
+- [x] `GET /metrics` endpoint for Prometheus scraping (isolated registry, no Go runtime noise)
+- [x] Dev observability stack: LGTM via Docker Compose (Grafana + Tempo + Loki + Prometheus + Alloy)
+    - Grafana at `http://localhost:3000`, all datasources pre-provisioned, no login required
+    - Alloy tails Docker container logs and ships structured JSON to Loki
+    - Log↔trace correlation wired: `trace_id` in log lines links to Tempo traces in Grafana
+
+**Design decision — Go runtime metrics deliberately excluded from dev registry:**
+`prometheus.NewRegistry()` (isolated) is used instead of `prometheus.DefaultRegisterer` to keep `/metrics` scoped to app-specific signals during development. Go runtime metrics (goroutines, GC pause, heap allocations, process CPU/memory) will be added to the registry in Phase 4 when operating the service as an SRE. See Phase 5.7.
 
 ### 3.2 Structured Logging
 
-- [ ] Use `log/slog` throughout with JSON handler in production
-- [ ] Include `request_id`, `method`, `path`, `status`, `duration` on every request
-- [ ] Log Neo4j query durations at debug level
-- [ ] Log errors with stack context
-- [ ] Ship logs to Cloud Logging (stdout in Cloud Run is auto-captured)
+- [x] Use `log/slog` throughout with JSON handler in production
+- [x] Include `request_id`, `method`, `path`, `status`, `duration_ms`, `remote_addr` on every request
+- [x] Log-trace correlation: `trace_id` and `span_id` appended to every request log line
+- [ ] Log Neo4j query durations at debug level (currently in spans only; not duplicated to logs)
+- [ ] Log errors with stack context (errors are recorded on spans via `RecordError`; no stack in logs yet)
+- [ ] Ship logs to Cloud Logging (stdout in Cloud Run is auto-captured — no code change needed)
 
 ### 3.3 Error Handling
 
@@ -269,6 +276,33 @@ These are portfolio-value additions that demonstrate operational maturity.
 - [ ] Cloud Scheduler trigger: weekly re-ingestion of new movies
 - [ ] Job logs and metrics visible in same dashboard
 - [ ] Idempotent ingestion: safe to re-run without duplicating data
+
+### 5.7 Runtime & Process Metrics (SRE layer)
+
+Dev intentionally exposes only app-specific metrics. When operating in production, add the
+standard Go runtime and process collectors to the Prometheus registry for full-stack visibility:
+
+```go
+// cmd/server/main.go — add after prometheus.NewRegistry()
+reg.MustRegister(collectors.NewGoCollector())
+reg.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
+```
+
+This adds ~30 time series covering:
+- **Go runtime:** goroutine count, GC pause durations (`go_gc_duration_seconds`), heap/stack
+  allocations, GC goal vs actual heap size — useful for detecting memory leaks and GC pressure
+- **Process:** CPU seconds (`process_cpu_seconds_total`), resident memory
+  (`process_resident_memory_bytes`), open file descriptors — the signals you reach for first
+  when a service starts behaving badly on a host
+
+These are distinct from the app metrics (query latency, request rate, graph size) in that they
+describe the runtime environment, not the business logic. Keeping them separate during dev avoids
+noise when building out the app-level signal library; merging them in production gives a complete
+picture for SRE work.
+
+- [ ] Add `collectors.NewGoCollector()` and `collectors.NewProcessCollector()` to registry in production build/config
+- [ ] Add runtime panels to Grafana dashboard: goroutine count, heap in-use, GC pause p99, open FDs
+- [ ] Set alert threshold on goroutine count (leak signal) and heap growth rate
 
 ## Build Order
 
