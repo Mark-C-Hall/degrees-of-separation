@@ -9,8 +9,6 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/prometheus/client_golang/prometheus"
-
 	"github.com/mark-c-hall/degrees-of-separation/internal/config"
 	"github.com/mark-c-hall/degrees-of-separation/internal/graph"
 	"github.com/mark-c-hall/degrees-of-separation/internal/handler"
@@ -26,11 +24,8 @@ func main() {
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 
-	// Isolated registry — excludes Go runtime metrics from prometheus.DefaultRegisterer.
-	reg := prometheus.NewRegistry()
-
 	ctx := context.Background()
-	otelShutdown, err := telemetry.Setup(ctx, reg)
+	otelShutdown, err := telemetry.Setup(ctx)
 	if err != nil {
 		log.Fatalf("failed to set up telemetry: %v", err)
 	}
@@ -44,7 +39,7 @@ func main() {
 		log.Fatalf("failed to set up schema: %v", err)
 	}
 
-	h, err := handler.NewHandler(d, web.FS, cfg.Server, logger, reg)
+	h, err := handler.NewHandler(d, web.FS, cfg.Server, logger)
 	if err != nil {
 		log.Fatalf("failed to initialize handler: %v", err)
 	}

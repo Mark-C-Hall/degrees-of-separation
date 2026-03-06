@@ -86,13 +86,15 @@ func NewDriver(ctx context.Context, cfg config.Config) (*Driver, error) {
 	}
 
 	// Gauge callback fires on each Prometheus scrape, not per-request.
+	// Uses a lightweight count query instead of GetStats to avoid the
+	// expensive per-node degree computation running every 15 seconds.
 	_, err = meter.RegisterCallback(func(ctx context.Context, o metric.Observer) error {
-		stats, err := d.GetStats(ctx)
+		counts, err := d.GetCounts(ctx)
 		if err != nil {
 			return nil // don't fail the scrape if the DB is temporarily down
 		}
-		o.ObserveInt64(d.actorsGauge, int64(stats.ActorCount))
-		o.ObserveInt64(d.edgesGauge, int64(stats.EdgeCount))
+		o.ObserveInt64(d.actorsGauge, int64(counts[0]))
+		o.ObserveInt64(d.edgesGauge, int64(counts[1]))
 		return nil
 	}, d.actorsGauge, d.edgesGauge)
 	if err != nil {
@@ -397,6 +399,34 @@ func (d *Driver) SetLastIngestedPage(ctx context.Context, page int) error {
 		return nil, nil
 	})
 	return err
+}
+
+// GetCounts returns actor and edge counts using two fast label/type scans.
+// Used by the Prometheus gauge callback so the expensive degree-sort in
+// GetStats doesn't run every scrape interval.
+func (d *Driver) GetCounts(ctx context.Context) ([2]int, error) {
+	cypher := `
+		OPTIONAL MATCH (a:Actor)
+		WITH count(a) AS actorCount
+		OPTIONAL MATCH ()-[r:COSTARRED]->()
+		RETURN actorCount, count(r) AS edgeCount`
+
+	session := d.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeRead})
+	defer session.Close(ctx)
+
+	result, err := session.Run(ctx, cypher, nil)
+	if err != nil {
+		return [2]int{}, fmt.Errorf("error getting counts: %w", err)
+	}
+
+	record, err := result.Single(ctx)
+	if err != nil {
+		return [2]int{}, nil
+	}
+
+	actorCount, _ := record.Get("actorCount")
+	edgeCount, _ := record.Get("edgeCount")
+	return [2]int{int(actorCount.(int64)), int(edgeCount.(int64))}, nil
 }
 
 // GetStats runs an aggregate Cypher query. Called from HTTP handlers and from

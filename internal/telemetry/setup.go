@@ -8,22 +8,19 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/prometheus/client_golang/prometheus"
-	promexporter "go.opentelemetry.io/otel/exporters/prometheus"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
 	"go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
-
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 )
 
 // Setup initialises the OTel SDK, installs global providers, and returns a
 // shutdown function. Call shutdown before process exit to flush buffered spans.
-func Setup(ctx context.Context, reg *prometheus.Registry) (shutdown func(context.Context) error, err error) {
-	// Resource attributes are attached to every span and metric.
+func Setup(ctx context.Context) (shutdown func(context.Context) error, err error) {
 	deployEnv := os.Getenv("DEPLOYMENT_ENV")
 	if deployEnv == "" {
 		deployEnv = "development"
@@ -45,15 +42,25 @@ func Setup(ctx context.Context, reg *prometheus.Registry) (shutdown func(context
 		sdktrace.WithSampler(sdktrace.AlwaysSample()),
 	}
 
-	// When an OTLP endpoint is configured (i.e. running in Docker with Tempo),
-	// send traces there. Otherwise fall back to stdout so spans are visible
-	// when running `go run` locally without the compose stack.
-	if endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"); endpoint != "" {
-		otlpExp, err := otlptracehttp.New(ctx)
+	// --- Metrics ---
+
+	mpOpts := []metric.Option{metric.WithResource(res)}
+
+	// When an OTLP endpoint is configured, push both traces and metrics via OTLP.
+	// Otherwise fall back to stdout traces; metrics are collected but discarded
+	// (no-reader SDK) when running locally without the compose stack.
+	if os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") != "" {
+		otlpTraceExp, err := otlptracehttp.New(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("creating OTLP trace exporter: %w", err)
 		}
-		tracerOpts = append(tracerOpts, sdktrace.WithBatcher(otlpExp))
+		tracerOpts = append(tracerOpts, sdktrace.WithBatcher(otlpTraceExp))
+
+		otlpMetricExp, err := otlpmetrichttp.New(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("creating OTLP metric exporter: %w", err)
+		}
+		mpOpts = append(mpOpts, metric.WithReader(metric.NewPeriodicReader(otlpMetricExp)))
 	} else {
 		stdoutExp, err := stdouttrace.New()
 		if err != nil {
@@ -65,18 +72,7 @@ func Setup(ctx context.Context, reg *prometheus.Registry) (shutdown func(context
 	tp := sdktrace.NewTracerProvider(tracerOpts...)
 	otel.SetTracerProvider(tp)
 
-	// --- Metrics (Prometheus bridge) ---
-
-	// promexporter bridges OTel metrics to Prometheus exposition format.
-	promExp, err := promexporter.New(promexporter.WithRegisterer(reg))
-	if err != nil {
-		return nil, fmt.Errorf("creating Prometheus metric exporter: %w", err)
-	}
-
-	mp := metric.NewMeterProvider(
-		metric.WithResource(res),
-		metric.WithReader(promExp),
-	)
+	mp := metric.NewMeterProvider(mpOpts...)
 	otel.SetMeterProvider(mp)
 
 	shutdown = func(ctx context.Context) error {

@@ -10,8 +10,6 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"golang.org/x/time/rate"
 
@@ -43,9 +41,8 @@ func commify(n int) string {
 	return s
 }
 
-// NewHandler constructs the HTTP handler stack. reg is a Prometheus registry
-// used to expose /metrics and to back the OTel Prometheus bridge.
-func NewHandler(db *graph.Driver, fs embed.FS, cfg config.ServerConfig, logger *slog.Logger, reg *prometheus.Registry) (*Handler, error) {
+// NewHandler constructs the HTTP handler stack.
+func NewHandler(db *graph.Driver, fs embed.FS, cfg config.ServerConfig, logger *slog.Logger) (*Handler, error) {
 	funcs := template.FuncMap{"commify": commify}
 	tmpl, err := template.New("").Funcs(funcs).ParseFS(fs, "templates/base.html", "templates/fragments/*.html")
 	if err != nil {
@@ -60,37 +57,26 @@ func NewHandler(db *graph.Driver, fs embed.FS, cfg config.ServerConfig, logger *
 	h := &Handler{db: db, tmpl: tmpl, logger: logger}
 
 	mux := http.NewServeMux()
-	addRoutes(mux, h, staticFS, reg)
+	addRoutes(mux, h, staticFS)
 
-	// otelhttp auto-creates a server span per request and records
-	// http.server.request.duration via the Prometheus bridge.
-	otelMux := otelhttp.NewHandler(mux, "degrees-of-separation",
+	// Build the inner middleware stack around the mux.
+	var inner http.Handler = mux
+	inner = mw.Timeout(cfg.RequestTimeout)(inner)
+	inner = mw.RateLimit(rate.Limit(cfg.RateLimitPerSec), cfg.RateBurst, logger)(inner)
+	inner = mw.Recovery(logger)(inner)
+	inner = mw.Logging(logger)(inner)
+	inner = mw.CORS(cfg.CORSOrigin)(inner)
+
+	// otelhttp wraps the entire middleware stack so its span is already in the
+	// request context when Logging runs. This is what makes trace_id available
+	// in log lines — Logging reads the span from r.Context() after next returns.
+	// r.Pattern is not set here (mux hasn't matched yet), but all our routes are
+	// static paths with no variables so URL.Path is equivalent.
+	h.handler = otelhttp.NewHandler(inner, "degrees-of-separation",
 		otelhttp.WithSpanNameFormatter(func(_ string, r *http.Request) string {
-			if r.Pattern != "" {
-				return r.Method + " " + r.Pattern
-			}
 			return r.Method + " " + r.URL.Path
 		}),
 	)
-
-	// Dispatcher: /metrics bypasses otelhttp so Prometheus scrapes don't
-	// generate traces that would skew latency percentiles.
-	dispatcher := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/metrics" {
-			mux.ServeHTTP(w, r)
-			return
-		}
-		otelMux.ServeHTTP(w, r)
-	})
-
-	var wrapped http.Handler = dispatcher
-	wrapped = mw.Timeout(cfg.RequestTimeout)(wrapped)
-	wrapped = mw.RateLimit(rate.Limit(cfg.RateLimitPerSec), cfg.RateBurst, logger)(wrapped)
-	wrapped = mw.Recovery(logger)(wrapped)
-	wrapped = mw.Logging(logger)(wrapped)
-	wrapped = mw.CORS(cfg.CORSOrigin)(wrapped)
-
-	h.handler = wrapped
 	return h, nil
 }
 
@@ -98,9 +84,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.handler.ServeHTTP(w, r)
 }
 
-func addRoutes(mux *http.ServeMux, h *Handler, staticFS iofs.FS, reg *prometheus.Registry) {
-	// /metrics is served directly from the mux, bypassing otelhttp.
-	mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{EnableOpenMetrics: true}))
+func addRoutes(mux *http.ServeMux, h *Handler, staticFS iofs.FS) {
 	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticFS))))
 	mux.HandleFunc("/", h.indexHandler)
 	mux.HandleFunc("/search", h.searchHandler)

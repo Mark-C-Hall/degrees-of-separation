@@ -3,22 +3,30 @@ discovery.docker "containers" {
   host = "unix:///var/run/docker.sock"
 }
 
-// Attach the Compose service name as a Loki label.
-loki.relabel "service_label" {
-  forward_to = []
+// Attach service_name as a Loki label so it matches the OTel service.name
+// resource attribute used in Tempo, enabling trace↔log correlation in Grafana.
+// Rule 1 seeds service_name from the Compose service name as a default.
+// Rule 2 overwrites it with the explicit service_name Docker label when present.
+discovery.relabel "service_label" {
+  targets = discovery.docker.containers.targets
 
   rule {
     source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
-    target_label  = "service"
+    target_label  = "service_name"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_label_service_name"]
+    regex         = "(.+)"
+    target_label  = "service_name"
   }
 }
 
-// Tail stdout/stderr from every container.
+// Tail stdout/stderr from every container using the relabeled targets.
 loki.source.docker "containers" {
-  host             = "unix:///var/run/docker.sock"
-  targets          = discovery.docker.containers.targets
-  forward_to       = [loki.process.extract_level.receiver]
-  relabeling_rules = loki.relabel.service_label.rules
+  host       = "unix:///var/run/docker.sock"
+  targets    = discovery.relabel.service_label.output
+  forward_to = [loki.process.extract_level.receiver]
 }
 
 // Parse JSON log lines and promote "level" as an indexed label.
@@ -43,6 +51,6 @@ loki.process "extract_level" {
 // Ship to local Loki.
 loki.write "local" {
   endpoint {
-    url = "http://loki:3100/loki/api/v1/push"
+    url = "http://lgtm:3100/loki/api/v1/push"
   }
 }

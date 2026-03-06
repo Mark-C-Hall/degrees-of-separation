@@ -2,18 +2,20 @@ services:
   server:
     build:
       dockerfile: dockerfile.dev
+    labels:
+      service_name: degrees-of-separation
     ports:
       - "8080:8080"
     environment:
       - NEO4J_URI=bolt://neo4j:7687
       - NEO4J_USER=neo4j
       - NEO4J_PASSWORD=devpassword
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://tempo:4318
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://lgtm:4318
       - DEPLOYMENT_ENV=development
     depends_on:
       neo4j:
         condition: service_healthy
-      tempo:
+      lgtm:
         condition: service_started
     develop:
       watch:
@@ -38,51 +40,16 @@ services:
       retries: 5
       start_period: 30s
 
-  # Tempo — distributed tracing backend (replaces Jaeger). Traces via Grafana → Explore → Tempo.
-  tempo:
-    image: grafana/tempo:latest
-    command: ["-config.file=/etc/tempo.yaml"]
-    volumes:
-      - ./docker/tempo/config.yaml:/etc/tempo.yaml:ro
-      - tempo-data:/var/tempo
-
-  # Loki — log aggregation backend. Logs via Grafana → Explore → Loki.
-  loki:
-    image: grafana/loki:latest
-    command: ["-config.file=/etc/loki/config.yaml"]
-    volumes:
-      - ./docker/loki/config.yaml:/etc/loki/config.yaml:ro
-      - loki-data:/loki
-
-  # Prometheus — scrapes /metrics and stores time-series data.
-  prometheus:
-    image: prom/prometheus:latest
-    command:
-      - --config.file=/etc/prometheus/prometheus.yml
-      - --storage.tsdb.retention.time=7d
-    volumes:
-      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - prometheus-data:/prometheus
+  # LGTM — single-image Grafana observability stack (Grafana + Tempo + Loki + Prometheus + OTel Collector).
+  # Grafana UI: http://localhost:3000 (no login). OTLP HTTP: http://lgtm:4318 (internal).
+  lgtm:
+    image: grafana/otel-lgtm:latest
     ports:
-      - "9090:9090"
+      - "3000:3000"   # Grafana UI
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
 
-  # Grafana — unified UI for traces, metrics, and logs. http://localhost:3000 (no login).
-  grafana:
-    image: grafana/grafana:latest
-    ports:
-      - "3000:3000"
-    environment:
-      - GF_AUTH_ANONYMOUS_ENABLED=true
-      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
-      - GF_AUTH_DISABLE_LOGIN_FORM=true
-    volumes:
-      - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro
-    depends_on:
-      - tempo
-      - loki
-      - prometheus
-
-  # Alloy — tails Docker container logs and ships them to Loki.
+  # Alloy — tails Docker container logs and ships them to Loki inside lgtm.
   alloy:
     image: grafana/alloy:latest
     command: run /etc/alloy/config.alloy
@@ -90,11 +57,8 @@ services:
       - ./docker/alloy/config.alloy:/etc/alloy/config.alloy:ro
       - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
-      - loki
+      - lgtm
 
 volumes:
   neo4j-data:
   neo4j-logs:
-  tempo-data:
-  loki-data:
-  prometheus-data:
