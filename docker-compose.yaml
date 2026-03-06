@@ -54,7 +54,7 @@ services:
     image: grafana/alloy:latest
     command: run /etc/alloy/config.alloy
     volumes:
-      - ./docker/alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - ./config.alloy:/etc/alloy/config.alloy:ro
       - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       - lgtm
